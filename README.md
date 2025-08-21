@@ -23,9 +23,10 @@ It was built out of frustration with how slow **RDM** is and the need to constan
 
 ---
 
+<a name="features" >
 ## 🚀 Features
+</a>
 
-<a name="features" > </a>
 
 - Manage up to **three configuration files** for flexible setups.  
 - Connect to **multiple servers at once** using **tags** and **tmux**.  
