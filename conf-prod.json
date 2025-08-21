@@ -1,0 +1,21 @@
+{
+    "username": "Administrator",
+    "boxes": {
+        "frontend1": {
+            "ip":"10.0.4.10",
+            "tag": "front" 
+        },
+        "frontend2": {
+            "ip":"10.0.4.11",
+            "tag": "front" 
+        },
+        "backend1": {
+            "ip":"10.0.4.23",
+            "tag": "back" 
+        },
+        "backend2": {
+            "ip":"10.0.4.24",
+            "tag": "back" 
+        }
+    }
+}

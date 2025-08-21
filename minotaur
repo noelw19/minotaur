@@ -160,11 +160,15 @@ password="$(getConfigProp "password")"
 # if no username defined exit
 
 if [ $print_config = true ]; then 
-    cat "${0%/*}"/"$current_config"
+    less "${0%/*}"/"$current_config"
     exit 0
 fi
 
 if [ $copy_flag = false ] && [ $ssh_flag = false ] ; then
+    if [ $tmux_help = true ]; then 
+        cat ${0%/*}/TMUX_HELP.txt
+        exit 0
+    fi
     echo "No copy -c or SSH -s flags set"
     echo "Exiting due to no task."
     echo
