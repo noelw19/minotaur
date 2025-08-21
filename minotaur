@@ -1,0 +1,468 @@
+#! /bin/bash
+#set -euo pipefail
+
+SESSION_NAME="SimpleRDMSession"
+
+copy_flag=false
+ssh_flag=false
+singlebox_flag="nil"
+ip_flag="nil"
+tag_flag='nil'
+environment_flag='nil'
+files='nil'
+tmux_help=false
+print_config=false
+
+dev_config='conf-dev.json'
+pre_config='conf-pre.json'
+prod_config='conf-prod.json'
+
+current_config="nil"
+
+echo 
+echo "Welcome To Minotaur"
+echo 
+
+getConfigProp () {
+    config="$(cat "${0%/*}"/"$current_config" | jq -r ".$1")"
+    echo "$config"
+    # echo $1
+}
+
+noBoxOrIPSetError () {
+    if [[ $singlebox_flag = "nil" ]] && [[ $ip_flag = "nil" ]]; then 
+        echo "No tags -t, box -b or ip -i specified"
+        exit 1
+    fi
+}
+
+tmuxHelp () {
+    if [ $tmux_help = true ] ; then
+        tmux send-keys -t $SESSION_NAME "less ${0%/*}/TMUX_HELP.txt" Enter
+    else 
+        tmux kill-window -t $SESSION_NAME
+    fi
+}
+
+print_usage() {
+    echo
+    echo "usage: minotaur [-cs] [-b boxname] [-t tagName] [-f fileToCopy] [-i ipToConnect]"
+    echo "  -c      copy files to servers"
+    echo "  -s      ssh to servers"
+    echo "  -b      name of box if connecting to single box"
+    echo "  -i      ip address if connecting to single box"
+    echo "  -t      tag name of boxes to connect or copy to"
+    echo "  -f      files to copy"
+    echo "  -e      evironment config: dev | pre | prod"
+    echo "  -z      dont open tmux help on start"
+    echo "  -p      print current config"
+    echo
+    exit 1
+}
+
+host_check() {
+    if nc -q 0 -w 1 "$1" 22 < /dev/null &> /dev/null 
+    then 
+        echo "success"
+    else 
+        echo "fail"
+    fi
+}
+
+scp_Command() {
+    # $1 key, $2 file, $3 username, $4 ip
+    local key="$1"
+    local file_to_copy="$2"
+    local username="$3"
+    local ip="$4"
+    local isTag=false
+
+    if [ ! -z $5 ]; then
+        echo "setting is tag to true"
+        local isTag=true
+    fi
+
+    if [ "$ip" = "nil" ]; then 
+        echo "Couldnt get IP from config file."
+    fi
+
+    hostIsUp="$(host_check $ip)"
+    echo "Ping Host: $ip"
+    echo "Ping Response: $hostIsUp"
+
+    if [[ "$hostIsUp" == "fail" ]]; then 
+        echo
+        echo "Error this host not reachable via ping."
+        echo "Testing ssh connection for this host anyway"
+        echo
+    fi 
+    echo "Copying to IP: $ip"
+    echo "Ping host up: $hostIsUp"
+    echo Running: scp -o ConnectTimeout=5 -i $key -r "$file_to_copy" "$username"@"$ip":~
+
+    if [ $isTag = true ]; then
+        tmux send-keys -t $SESSION_NAME "scp -o ConnectTimeout=5 -i $key -r "$file_to_copy" "$username"@"$ip":~" Enter
+        tmux new-window -t $SESSION_NAME
+    else
+        scp -o ConnectTimeout=5 -i $key -r "$file_to_copy" "$username"@"$ip":~
+    fi
+
+}
+
+while getopts 'cszt:f:b:i:e:hp' flag; do
+  case "${flag}" in
+    c) copy_flag=true ;;
+    s) ssh_flag=true ;;
+    z) tmux_help=true ;;
+    p) print_config=true ;;
+    b) singlebox_flag="\"${OPTARG}\"" ;;
+    i) ip_flag="${OPTARG}" ;;
+    t) tag_flag="${OPTARG}" ;;
+    e) environment_flag="${OPTARG}" ;;
+    f) files="${OPTARG}" ;;
+    h) print_usage ;;
+  esac
+done
+
+echo
+echo "Defaults: "
+echo
+echo "Copy flag: $copy_flag"
+echo "SSH flag: $ssh_flag"
+echo "Box Flag: $singlebox_flag"
+echo "IP: $ip_flag"
+echo "Tag Flag: $tag_flag"
+echo "File: $files"
+echo "TMUX help: $tmux_help"
+echo
+
+if [[ $environment_flag = "dev" ]]; then 
+    current_config="$dev_config"
+elif [[ $environment_flag = "pre" ]]; then 
+    current_config=$pre_config
+elif [[ $environment_flag = "prod" ]]; then 
+    current_config=$prod_config
+else
+    echo "Setting Current environment to default of pre prod"
+    echo "Config file: $pre_config"
+    echo
+    current_config=$pre_config
+fi
+
+# Get ssh key from config file
+key="$(getConfigProp "sshKey")"
+
+# password unimplemented
+password="$(getConfigProp "password")"
+
+# if no key and no password then exit
+# if both the prefer key
+# if no username defined exit
+
+if [ $print_config = true ]; then 
+    cat "${0%/*}"/"$current_config"
+    exit 0
+fi
+
+if [ $copy_flag = false ] && [ $ssh_flag = false ] ; then
+    echo "No copy -c or SSH -s flags set"
+    echo "Exiting due to no task."
+    echo
+    exit 0
+fi
+
+# check if has -t, -i, -b
+# if none of these then no box to connect is defined
+if [ "$ip_flag" = "nil" ] && [ "$singlebox_flag" = "nil" ] && [ "$tag_flag" = "nil" ]; then
+    echo
+    echo "No server address defined."
+    echo "Please use a tag -t, a box name -b or an ip -i"
+    echo "Exiting due to no server address defined."
+    echo
+    exit 1
+fi
+
+if [ $copy_flag = true ] ; then
+    echo "Starting the copying process..."
+    if [ "$files" = "nil" ]; then 
+        echo
+        echo "Error:"
+        echo "Copy flag -c set with no file flag eg: -c -f file/location"
+        echo "We need files in order to copy anything..."
+        echo 
+        exit 1
+    fi
+
+    if [ ! -f $files ]; then 
+        echo
+        echo "The file you want to copy does not exist."
+        echo "Path: $files"
+        echo 
+        exit 1
+    fi
+
+    if [ "$tag_flag" != "nil" ] ; then 
+        # has flag tag for copy
+        echo "Tag: $tag_flag"
+        tmux new-session -d -s $SESSION_NAME
+
+        username="$(getConfigProp "username")"
+        box="$(getConfigProp "boxes | keys")"
+
+        for b in $box
+        do
+            if [[ $b = "[" ]] || [[ $b = "]" ]] || [[ $b = " " ]]; then
+                echo ""
+            else 
+                if [[ $b == *"," ]]; then
+                    # remove comma
+                    b=${b::-1}
+                fi
+
+                boxName=$b
+                serviceTag="$(getConfigProp "boxes.$b.tag")"
+                ip="$(getConfigProp "boxes.$b.ip")"
+                specificUsername="$(getConfigProp "boxes.$b.username")"
+
+                if [ -z "$boxName" ]; then 
+                    continue
+                fi
+
+                if [ "$tag_flag" = "$serviceTag" ]; then 
+                    
+                    if [ "$specificUsername" != "null" ]; then
+                        echo "$boxName has its own username defined"
+                        echo "Logging into box using username: $specificUsername $(echo $specificUsername != null) "
+                        username="$specificUsername"
+                    fi
+
+                    echo
+                    echo "Sending to $b"
+
+                    tmux rename-window "${b:1:-1}"
+                    scp_Command $key $files $username $ip true
+                    tmux attach -t $SESSION_NAME
+                fi
+            fi
+        done
+
+    else 
+        # doesnt have flag tag for copy
+
+        noBoxOrIPSetError
+        username="$(getConfigProp "username")"
+        box="$(getConfigProp "boxes | keys")"
+
+        for b in $box
+        do
+            if [[ $b = "[" ]] || [[ $b = "]" ]] || [[ $b = " " ]]; then
+                echo ""
+            else 
+                if [[ $b == *"," ]]; then
+                    # echo "has comma"
+                    b=${b::-1}
+                fi
+
+                boxName=$b
+                serviceTag="$(getConfigProp "boxes.$b.tag")"
+                ip="$(getConfigProp "boxes.$b.ip")"
+                specificUsername="$(getConfigProp "boxes.$b.username")"
+
+                if [ -z "$boxName" ]; then 
+                    continue
+                fi
+
+                if [[ "$singlebox_flag" != "nil" ]] && [ "$singlebox_flag" = "$boxName" ]; then
+                    if [ "$specificUsername" != "null" ]; then
+                        echo "$boxName has its own username defined"
+                        echo "Logging into box using username: $specificUsername"
+                        username="$specificUsername"
+                    fi
+
+                    echo "Found single box"
+                    echo "Sending to $b"
+                    scp_Command $key $files $username $ip
+
+                elif [[ "$ip_flag" != "nil" ]] && [[ "$ip_flag" = "$ip" ]]; then
+                    if [ "$specificUsername" != "null" ]; then
+                        echo "$boxName has its own username defined"
+                        echo "Logging into box using username: $specificUsername"
+                        username="$specificUsername"
+                    fi
+
+                    echo "Found single box via ip"
+                    echo "Sending to $b"
+                    scp_Command $key $files $username $ip
+
+                fi 
+            fi
+        done
+    fi
+fi
+
+# 
+#  SSH Flag is true
+# 
+
+if [ $ssh_flag = true ] ; then
+    echo "Starting connection process..."
+    tmux new-session -d -s $SESSION_NAME
+
+    if [ "$tag_flag" != "nil" ] ; then 
+        echo "Tag: $tag_flag"
+
+        username="$(getConfigProp "username")"
+        box="$(getConfigProp "boxes | keys")"
+
+        for b in $box
+        do
+            if [[ $b = "[" ]] || [[ $b = "]" ]] || [[ $b = " " ]]; then
+                echo ""
+            else 
+                if [[ $b == *"," ]]; then
+                    # echo "has comma"
+                    b=${b::-1}
+                fi
+                # echo "Tag here: $b"
+                boxName=$b
+                serviceTag="$(getConfigProp "boxes.$b.tag")"
+                ip="$(getConfigProp "boxes.$b.ip")"
+                specificUsername="$(getConfigProp "boxes.$b.username")"
+
+                if [ -z "$boxName" ]; then 
+                    continue
+                fi
+
+                if [ "$tag_flag" = "$serviceTag" ]; then 
+                    echo "Server: $b"
+                    echo "IP: $ip"
+
+                    if [ "$specificUsername" != "null" ]; then
+                        echo "$boxName has its own username defined"
+                        echo "Logging into box using username: $specificUsername"
+                        username="$specificUsername"
+                    fi
+
+                    hostIsUp="$(host_check $ip)"
+                    echo "Ping Host: $ip"
+                    echo "Ping Response: $hostIsUp"
+
+                    if [[ "$hostIsUp" == "fail" ]]; then 
+                        echo
+                        echo "Error this host not reachable via ping."
+                        echo "Testing ssh connection for this host anyway"
+                        echo
+                    fi 
+
+                    # echo usename is $username key is ssh_key box is $ip
+                    echo Running: ssh -i $key "$username"@"$ip"
+                    tmux rename-window "${b:1:-1}"
+                    tmux send-keys -t $SESSION_NAME "ssh -o ConnectTimeout=5 -i $key $username@$ip" Enter
+                    tmux new-window -t $SESSION_NAME
+                fi
+            fi
+        done
+
+
+        tmuxHelp
+        tmux attach -t $SESSION_NAME
+    else 
+        # if no tag then probably for specific box
+        echo 
+        echo "Tags not used"
+        echo "Checking IP and box flags"
+        echo
+
+        noBoxOrIPSetError
+
+        username="$(getConfigProp "username")"
+        box="$(getConfigProp "boxes | keys")"
+
+        for b in $box
+        do
+            if [[ $b = "[" ]] || [[ $b = "]" ]] || [[ $b = " " ]]; then
+                echo ""
+            else 
+                if [[ $b == *"," ]]; then
+                    # echo "has comma"
+                    b=${b::-1}
+                fi
+                # echo "Tag here: $b"
+                boxName=$b
+                serviceTag="$(getConfigProp "boxes.$b.tag")"
+                ip="$(getConfigProp "boxes.$b.ip")"
+                specificUsername="$(getConfigProp "boxes.$b.username")"
+
+                if [ -z "$boxName" ]; then 
+                    continue
+                fi
+
+                if [[ "$singlebox_flag" != "nil" ]] && [ "$singlebox_flag" = "$boxName" ]; then
+                    echo "Found single box: $b"
+
+                    if [ "$specificUsername" != "null" ]; then
+                        echo "$boxName has its own username defined"
+                        echo "Logging into box using username: $specificUsername"
+                        username="$specificUsername"
+                    fi
+
+                    hostIsUp="$(host_check $ip)"
+                    echo "Ping Host: $ip"
+                    echo "Ping Response: $hostIsUp"
+
+                    if [[ "$hostIsUp" == "fail" ]]; then 
+                        echo
+                        echo "Error this host not reachable via ping."
+                        echo "Testing ssh connection for this host anyway"
+                        echo
+                        return
+                    fi 
+
+                    # echo usename is $username key is $key box is $ip
+                    echo Running: ssh -i $key "$username"@"$ip"
+                    # add code to open in tmux
+                    tmux rename-window ${b:1:-1}
+                    tmux send-keys -t $SESSION_NAME "ssh -o ConnectTimeout=5 -i $key $username@$ip" Enter
+                    tmux new-window -t $SESSION_NAME
+                    
+
+                elif [[ "$ip_flag" != "nil" ]] && [[ "$ip_flag" = "$ip" ]]; then
+                    echo "Opening box via IP"
+                    echo "Sending to $b"
+
+                    if [ "$specificUsername" != "null" ]; then
+                        echo "$boxName has its own username defined"
+                        echo "Logging into box using username: $specificUsername"
+                        username="$specificUsername"
+                    fi
+
+                    hostIsUp="$(host_check $ip)"
+                    echo "Ping Host: $ip"
+                    echo "Ping Response: $hostIsUp"
+
+                    if [[ "$hostIsUp" == "fail" ]]; then 
+                        echo
+                        echo "Error this host not reachable via ping."
+                        echo "Testing ssh connection for this host anyway"
+                        echo
+                        return
+                    fi 
+                    # echo usename is $username key is $key box is $ip
+                    echo Running: ssh -i $key "$username"@"$ip"
+                    # add code to open in tmux
+                    tmux rename-window ${b:1:-1}
+                    tmux send-keys -t $SESSION_NAME "ssh -o ConnectTimeout=5 -i $key $username@$ip" Enter
+                    tmux new-window -t $SESSION_NAME
+                    
+                fi 
+
+            fi
+        done
+
+        tmuxHelp
+        tmux attach -t $SESSION_NAME
+    fi
+fi
+
+
+
