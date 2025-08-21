@@ -23,9 +23,8 @@ It was built out of frustration with how slow **RDM** is and the need to constan
 
 ---
 
-<a name="features" >
+<a name="features"></a>
 ## 🚀 Features
-</a>
 
 
 - Manage up to **three configuration files** for flexible setups.  
@@ -35,6 +34,7 @@ It was built out of frustration with how slow **RDM** is and the need to constan
 
 ---
 
+<a name="installation"></a>
 ## ⚙️ Installation  
 
 Clone the repository and add Minotaur to your `$PATH`:  
@@ -53,6 +53,7 @@ export PATH=$PATH:~/path/to/minotaur/
 
 ---
 
+<a name="authentication"></a>
 ## 🔐 Authentication  
 
 - **SSH key support** is built-in, allowing secure, passwordless logins.  
@@ -61,6 +62,7 @@ export PATH=$PATH:~/path/to/minotaur/
 
 ---
 
+<a name="workflow"></a>
 ## 🖥 Workflow  
 
 When you’re done, simply exit the session with:  
@@ -73,6 +75,7 @@ This closes the entire tmux session—no need to `exit` a hundred times.
 
 ---
 
+<a name="usage"></a>
 ## 📘 Usage  
 
 ### Copy Files  
@@ -107,6 +110,7 @@ minotaur -z
 
 ---
 
+<a name="configuration"></a>
 ## ⚡ Configuration  
 
 Minotaur supports three environment-specific config files:  
@@ -137,6 +141,7 @@ Minotaur supports three environment-specific config files:
 
 ---
 
+<a name="quick-start"></a>
 ## ⚡ Quick Start  
 
 1. Define your servers in `conf-dev.json`.  
@@ -154,6 +159,7 @@ minotaur -s -t back -e dev
 
 ---
 
+<a name="contributing"></a>
 ## 🤝 Contributing  
 
 PRs are welcome! If you’d like to improve Minotaur, fork the repo and submit a pull request.  
