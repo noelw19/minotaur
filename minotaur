@@ -1,5 +1,5 @@
 #! /bin/bash
-#set -euo pipefail
+#tmux set -euo pipefail
 
 SESSION_NAME="SimpleRDMSession"
 
@@ -8,6 +8,7 @@ ssh_flag=false
 singlebox_flag="nil"
 ip_flag="nil"
 tag_flag='nil'
+host_flag='nil'
 environment_flag='nil'
 files='nil'
 tmux_help=false
@@ -17,25 +18,61 @@ dev_config='conf-dev.json'
 pre_config='conf-pre.json'
 prod_config='conf-prod.json'
 
+isZsh=$( echo "$SHELL" | grep bash) 
+
+echo "$isBash"
+
 current_config="nil"
+
+showBindings() {
+    echo
+    echo "----- Custom TMUX bindings -----"
+    echo
+    echo "Ctrl-q to close minotaur"
+    echo "Ctrl-w to merge current window into another"
+    echo "Ctrl-o to break the panes into seperate windows"
+    echo "Ctrl-s to sync all panes in a window and mirror commands"
+    echo
+    echo "To sync panes and broadcast: the windows that will broadcast need to be merged into the same window once merged, toggle Ctrl-s to turn on boradcasting"
+    echo
+}
 
 checkTMUXInstalled () {
     if ! command -v tmux &> /dev/null; then
-        echo
         echo "Error:"
         echo "tmux is not installed."
         echo "Install tmux and rerun the program."
         echo
         echo
         exit 1
+    else 
+        echo "Tmux installed"
+        echo
+        showBindings
+        if [ $print_config != true ]; then 
+            sleep 3
+        fi
     fi
 }
 
 Begin () {
     echo 
-    echo "Welcome To Minotaur"
-    echo 
-
+    echo -e "\033[0;32m"
+    cat << "EOF"
+        
+                                                                                       
+88b           d88 88                                                                   
+888b         d888 ""                          ,d                                       
+88`8b       d8'88                             88                                       
+88 `8b     d8' 88 88 8b,dPPYba,   ,adPPYba, MM88MMM ,adPPYYba, 88       88 8b,dPPYba,  
+88  `8b   d8'  88 88 88P'   `"8a a8"     "8a  88    ""     `Y8 88       88 88P'   "Y8  
+88   `8b d8'   88 88 88       88 8b       d8  88    ,adPPPPP88 88       88 88          
+88    `888'    88 88 88       88 "8a,   ,a8"  88,   88,    ,88 "8a,   ,a88 88          
+88     `8'     88 88 88       88  `"YbbdP"'   "Y888 `"8bbdP"Y8  `"YbbdP'Y8 88          
+                                                                                       
+                                                                                       
+EOF
+    echo -e "\033[0m"
     checkTMUXInstalled
 }
 
@@ -46,8 +83,8 @@ getConfigProp () {
 }
 
 noBoxOrIPSetError () {
-    if [[ $singlebox_flag = "nil" ]] && [[ $ip_flag = "nil" ]]; then 
-        echo "No tags -t, box -b or ip -i specified"
+    if [[ $singlebox_flag = "nil" ]] && [[ $ip_flag = "nil" ]] && [[ $host_flag = "nil" ]]; then 
+        echo "No box -b, ip -i or hostname -H specified"
         exit 1
     fi
 }
@@ -60,9 +97,66 @@ tmuxHelp () {
     fi
 }
 
+# shellcheck disable=SC2120
+tmuxBindings() {
+
+    if tmux has-session -t $SESSION_NAME 2>/dev/null; then
+        echo
+        echo "Minotaur session already exists"
+        echo "Connecting to existsing session with new window"
+        echo
+        tmux new-window -t $SESSION_NAME
+    else 
+        tmux new-session -d -s $SESSION_NAME
+    fi
+    
+
+    tmux bind -n C-q kill-session
+    tmux bind -n C-w command-prompt -p "non-current index of window to merge: " "join-pane -h -t :%1"
+    tmux bind -n C-o break-pane
+    tmux bind -n C-s setw synchronize-panes 
+
+    # Aesthetic Tweaks
+
+    # don't do anything when a 'bell' rings
+    tmux set visual-bell off
+    tmux set visual-silence off
+    tmux set visual-activity off
+    tmux setw monitor-activity off
+    tmux set bell-action none
+
+    # visual notification of activity in other windows
+    tmux setw monitor-activity on
+    tmux set visual-activity on
+
+   # Status line
+    tmux set -g status-style fg=colour235,bg=colour235
+
+    # Borders
+    tmux set -g pane-border-style fg=colour200
+    tmux set -g pane-active-border-style fg=colour154
+
+    # Left and right status sections
+    tmux set -g status-left-length 60
+    tmux set -g status-right-length 120
+
+    tmux set -g status-left '#[fg=colour232,bg=colour154]  #[fg=colour222,bg=colour238] #W #[fg=colour238,bg=colour235,nobold,nounderscore,noitalics]#[fg=colour121,bg=colour235] #[fg=colour235,bg=colour235,nobold,nounderscore,noitalics]'
+
+    tmux set -g status-right '#[fg=colour235,bg=colour235,nobold,nounderscore,noitalics] #[fg=colour121,bg=colour235] #H #[fg=colour154,bg=colour238,nobold,nounderscore,noitalics]#[fg=colour232,bg=colour154] #{?pane_synchronized, #[bg=red] SYNC!!!#[colour200],}'
+
+    # Window status styles
+    tmux setw -g window-status-style fg=colour121,bg=colour235
+    tmux setw -g window-status-current-style fg=colour222,bg=colour238
+
+    # Window formats
+    tmux setw -g window-status-format '#[fg=colour235,bg=colour235,nobold,nounderscore,noitalics]#[default] #I  #W #[fg=colour235,bg=colour235,nobold,nounderscore,noitalics] '
+    tmux setw -g window-status-current-format '#[fg=colour235,bg=colour238,nobold,nounderscore,noitalics]#[fg=colour222,bg=colour238] #I  #W  #[fg=colour238,bg=colour235,nobold,nounderscore,noitalics] '
+
+}
+
 print_usage() {
     echo
-    echo "usage: minotaur [-cs] [-b boxname] [-t tagName] [-f fileToCopy] [-i ipToConnect]"
+    echo "usage: minotaur [-cs] [-b boxname] [-t tagName] [-f fileToCopy] [-i ipToConnect] [-H hostnameToConnect]"
     echo "  -c      copy files to servers"
     echo "  -s      ssh to servers"
     echo "  -b      name of box if connecting to single box"
@@ -76,13 +170,31 @@ print_usage() {
     exit 1
 }
 
+digHostname() {
+    ip="$1"
+    fallbackBoxname="$2"
+    if [ -z "$(dig -x "$ip" +short)" ]; then 
+        echo "$fallbackBoxname"; 
+    else 
+        dig -x "$ip" +short | awk -F. '{ print $1 }'
+    fi
+}
+
 host_check() {
-    if nc -q 0 -w 1 "$1" 22 < /dev/null &> /dev/null 
+    if nc -zw2 "$1" 22 2>&1
     then 
         echo "success"
     else 
         echo "fail"
     fi
+    # $(ssh -o BatchMode=yes -o ConnectTimeout=5 user@host echo ok 2>&1)
+}
+
+# removes quotes using parameter expansion
+removeQuotes() {
+    local str="$1"
+    local newStr="${str//\"/}"
+    echo "$newStr"
 }
 
 checkfileExist () {
@@ -125,18 +237,39 @@ scp_Command() {
     fi 
     echo "Copying to IP: $ip"
     echo "Ping host up: $hostIsUp"
-    echo Running: scp -o ConnectTimeout=5 -i "$sshKey" -r "$file_to_copy" "$username"@"$ip":~
+    echo Running: scp -o ConnectTimeout=5 -i "$key" -r "$file_to_copy" "$username"@"$ip":~
 
-    if [ $isTag = true ]; then
-        tmux send-keys -t $SESSION_NAME "scp -o ConnectTimeout=5 -i $sshKey -r $file_to_copy $username@$ip:~" Enter
-        tmux new-window -t $SESSION_NAME
-    else
-        scp -o ConnectTimeout=5 -i "$sshKey" -r "$file_to_copy" "$username"@"$ip":~
+    if [ -z "$key" ]; then
+        if [ $isTag = true ]; then
+            tmux send-keys -t $SESSION_NAME "scp -o ConnectTimeout=5 -r $file_to_copy $username@$ip:~" Enter
+            tmux new-window -t $SESSION_NAME
+        else
+            scp -o ConnectTimeout=5 -r "$file_to_copy" "$username"@"$ip":~
+        fi
+    else 
+        if [ $isTag = true ]; then
+            tmux send-keys -t $SESSION_NAME "scp -o ConnectTimeout=5 -i $key -r $file_to_copy $username@$ip:~" Enter
+            tmux new-window -t $SESSION_NAME
+        else
+            scp -o ConnectTimeout=5 -i "$key" -r "$file_to_copy" "$username"@"$ip":~
+        fi
     fi
-
 }
 
-while getopts 'cszt:f:b:i:e:hp' flag; do
+# builds ssh command (sshKey, username, ip)
+sshCommandBuilder() {
+    local sshKey="$1"
+    local username="$2"
+    local ip="$3"
+
+    if [[ $sshKey = null ]]; then
+        echo "ssh -o ConnectTimeout=5 $username@$ip"
+    else 
+        echo "ssh -o ConnectTimeout=5 -i $sshKey $username@$ip"
+    fi
+}
+
+while getopts 'cszt:f:b:i:e:hpH:' flag; do
   case "${flag}" in
     c) copy_flag=true ;;
     s) ssh_flag=true ;;
@@ -147,13 +280,13 @@ while getopts 'cszt:f:b:i:e:hp' flag; do
     t) tag_flag="${OPTARG}" ;;
     e) environment_flag="${OPTARG}" ;;
     f) files="${OPTARG}" ;;
+    H) host_flag="${OPTARG}" ;;
     h) print_usage ;;
     *) print_usage ;;
   esac
 done
 
 # Script Into
-
 Begin
 
 echo
@@ -164,6 +297,7 @@ echo "SSH flag: $ssh_flag"
 echo "Box Flag: $singlebox_flag"
 echo "IP: $ip_flag"
 echo "Tag Flag: $tag_flag"
+echo "Host Flag: $host_flag"
 echo "File: $files"
 echo "TMUX help: $tmux_help"
 echo
@@ -202,7 +336,7 @@ if [ $copy_flag = false ] && [ $ssh_flag = false ] ; then
         cat "${0%/*}"/TMUX_HELP.txt
         exit 0
     fi
-    echo "No copy -c or SSH -s flags set"
+    echo "No copy -c or SSH -s flags tmux set"
     echo "Exiting due to no task."
     echo
     exit 0
@@ -210,7 +344,7 @@ fi
 
 # check if has -t, -i, -b
 # if none of these then no box to connect is defined
-if [ "$ip_flag" = "nil" ] && [ "$singlebox_flag" = "nil" ] && [ "$tag_flag" = "nil" ]; then
+if [ "$ip_flag" = "nil" ] && [ "$singlebox_flag" = "nil" ] && [ "$tag_flag" = "nil" ] && [ "$host_flag" = "nil" ]; then
     echo
     echo "No server address defined."
     echo "Please use a tag -t, a box name -b or an ip -i"
@@ -219,12 +353,16 @@ if [ "$ip_flag" = "nil" ] && [ "$singlebox_flag" = "nil" ] && [ "$tag_flag" = "n
     exit 1
 fi
 
+# 
+# Copy Flag is true
+# 
+
 if [ $copy_flag = true ] ; then
     echo "Starting the copying process..."
     if [ "$files" = "nil" ]; then 
         echo
         echo "Error:"
-        echo "Copy flag -c set with no file flag eg: -c -f file/location"
+        echo "Copy flag -c tmux set with no file flag eg: -c -f file/location"
         echo "We need files in order to copy anything..."
         echo 
         exit 1
@@ -233,9 +371,10 @@ if [ $copy_flag = true ] ; then
     checkfileExist "$files"
 
     if [ "$tag_flag" != "nil" ] ; then 
-        # has flag tag for copy
+        # Connect via tag
+
         echo "Tag: $tag_flag"
-        tmux new-session -d -s $SESSION_NAME
+        tmuxBindings
 
         username="$(getConfigProp "username")"
         box="$(getConfigProp "boxes | keys")"
@@ -253,13 +392,17 @@ if [ $copy_flag = true ] ; then
                 boxName=$b
                 serviceTag="$(getConfigProp "boxes.$b.tag")"
                 ip="$(getConfigProp "boxes.$b.ip")"
+                # Check if hostname available (for window name)
+                boxName=$(digHostname "$ip" "$boxName")
+                # remove quotes if any
+                boxName=$(removeQuotes "$boxName")
                 specificUsername="$(getConfigProp "boxes.$b.username")"
 
                 if [ -z "$boxName" ]; then 
                     continue
                 fi
 
-                if [ "$tag_flag" = "$serviceTag" ]; then 
+                if [ "${tag_flag,,}" = "${serviceTag,,}" ]; then 
                     
                     if [ "$specificUsername" != "null" ]; then
                         echo "$boxName has its own username defined"
@@ -270,15 +413,15 @@ if [ $copy_flag = true ] ; then
                     echo
                     echo "Sending to $b"
 
-                    tmux rename-window "${b:1:-1}"
-                    scp_Command "$sshKey" "$files" "$username" "$ip" true
-                    tmux attach -t $SESSION_NAME
+                    tmux rename-window "${boxName}"
+                    scp_Command "$sshKey" "$files" "$username" "$ip" true                    
                 fi
             fi
         done
-
+        tmuxHelp
+        tmux attach -t $SESSION_NAME
     else 
-        # doesnt have flag tag for copy
+        # Connect via Box name or IP 
 
         noBoxOrIPSetError
         username="$(getConfigProp "username")"
@@ -297,13 +440,18 @@ if [ $copy_flag = true ] ; then
                 boxName=$b
                 serviceTag="$(getConfigProp "boxes.$b.tag")"
                 ip="$(getConfigProp "boxes.$b.ip")"
+                # Check if hostname available (for window name)
+                hostName=$(digHostname "$ip" "$boxName")
+                boxName=$hostName
+                # remove quotes if any
+                boxName=$(removeQuotes "$boxName")
                 specificUsername="$(getConfigProp "boxes.$b.username")"
 
                 if [ -z "$boxName" ]; then 
                     continue
                 fi
 
-                if [[ "$singlebox_flag" != "nil" ]] && [ "$singlebox_flag" = "$boxName" ]; then
+                if [[ "${singlebox_flag,,}" != "nil" ]] && [ "${singlebox_flag,,}" = "${boxName,,}" ]; then
                     if [ "$specificUsername" != "null" ]; then
                         echo "$boxName has its own username defined"
                         echo "Logging into box using username: $specificUsername"
@@ -324,6 +472,16 @@ if [ $copy_flag = true ] ; then
                     echo "Found single box via ip"
                     echo "Sending to $b"
                     scp_Command "$sshKey" "$files" "$username" "$ip"
+                elif [[ "$host_flag" != "nil" ]] && [[ "${host_flag,,}" = "${hostName,,}" ]]; then
+                    if [ "$specificUsername" != "null" ]; then
+                        echo "$boxName has its own username defined"
+                        echo "Logging into box using username: $specificUsername"
+                        username="$specificUsername"
+                    fi
+
+                    echo "Found single box via hostname"
+                    echo "Sending to $b"
+                    scp_Command "$sshKey" "$files" "$username" "$ip"
 
                 fi 
             fi
@@ -337,9 +495,12 @@ fi
 
 if [ $ssh_flag = true ] ; then
     echo "Starting connection process..."
-    tmux new-session -d -s $SESSION_NAME
+    tmuxBindings
+
 
     if [ "$tag_flag" != "nil" ] ; then 
+        # Connect via tag
+
         echo "Tag: $tag_flag"
 
         username="$(getConfigProp "username")"
@@ -352,7 +513,6 @@ if [ $ssh_flag = true ] ; then
             else 
                 if [[ $b == *"," ]]; then
                     # echo "has comma"
-                    echo "$b"
                     b=${b%?}
                     # b=${b%?}
                 fi
@@ -360,13 +520,17 @@ if [ $ssh_flag = true ] ; then
                 boxName=$b
                 serviceTag="$(getConfigProp "boxes.$b.tag")"
                 ip="$(getConfigProp "boxes.$b.ip")"
+                # Check if hostname available (for window name)
+                boxName=$(digHostname "$ip" "$boxName")
+                # remove quotes around any strings
+                boxName=$(removeQuotes "$boxName")
                 specificUsername="$(getConfigProp "boxes.$b.username")"
 
                 if [ -z "$boxName" ]; then 
                     continue
                 fi
 
-                if [ "$tag_flag" = "$serviceTag" ]; then 
+                if [ "${tag_flag,,}" = "${serviceTag,,}" ]; then 
                     echo "Server: $b"
                     echo "IP: $ip"
 
@@ -387,56 +551,58 @@ if [ $ssh_flag = true ] ; then
                         echo
                     fi 
 
-                    # echo usename is $username key is ssh_key box is $ip
-                    echo Running: ssh -i "$sshKey" "$username"@"$ip"
-                    tmux rename-window "${b: -1}"
+                    sshCommand="$(sshCommandBuilder "$sshKey" "$username" "$ip" )"
+                    echo Running: "$sshCommand"
+                    tmux rename-window "${boxName}"
                     # tmux rename-window "${b:1:-1}"
-                    tmux send-keys -t $SESSION_NAME "ssh -o ConnectTimeout=5 -i $sshKey $username@$ip" Enter
+                    tmux send-keys -t $SESSION_NAME "$sshCommand" Enter
+                    
                     tmux new-window -t $SESSION_NAME
+                    echo 
                 fi
             fi
         done
-
-
         tmuxHelp
         tmux attach -t $SESSION_NAME
     else 
-        # if no tag then probably for specific box
+        # Connect via Box name or IP 
+
         echo 
         echo "Tags not used"
-        echo "Checking IP and box flags"
+        echo "Checking for specific box"
         echo
 
         noBoxOrIPSetError
 
         username="$(getConfigProp "username")"
         box="$(getConfigProp "boxes | keys")"
-        echo "Checking for specific box"
 
         for b in $box
         do
-            if [[ $b = "[" ]] || [[ $b = "]" ]] || [[ $b = " " ]]; then
+            if [[ "$b" = "[" ]] || [[ $b = "]" ]] || [[ $b = " " ]]; then
                 echo ""
             else 
-                if [[ $b == *"," ]]; then
+                if [[ "$b" == *"," ]]; then
                     # echo "has comma"
                     b=${b%?}
 
                 fi
                 # echo "Tag here: $b"
-                boxName=$b
+                boxName="$b"
                 serviceTag="$(getConfigProp "boxes.$b.tag")"
                 ip="$(getConfigProp "boxes.$b.ip")"
+                # Check if hostname available (for window name)
+                hostName=$(digHostname "$ip" "$boxName")
+                boxName="$hostName"
+                boxName=$(removeQuotes "$boxName")
                 specificUsername="$(getConfigProp "boxes.$b.username")"
-
-                echo "checking $b"
 
                 if [ -z "$boxName" ]; then 
                 echo "No box name"
                     continue
                 fi
 
-                if [[ "$singlebox_flag" != "nil" ]] && [ "$singlebox_flag" = "$boxName" ]; then
+                if [[ "$singlebox_flag" != "nil" ]] && [ "${singlebox_flag,,}" = "${boxName,,}" ]; then
                     echo "Found single box: $b"
 
                     if [ "$specificUsername" != "null" ]; then
@@ -457,11 +623,12 @@ if [ $ssh_flag = true ] ; then
                         return
                     fi 
 
-                    # echo usename is $username key is $sshKey box is $ip
-                    echo Running: ssh -i "$sshKey" "$username"@"$ip"
+                    sshCommand="$(sshCommandBuilder "$sshKey" "$username" "$ip" )"
+                    echo Running: "$sshCommand"
                     # add code to open in tmux
-                    tmux rename-window "${b%?}"
-                    tmux send-keys -t $SESSION_NAME "ssh -o ConnectTimeout=5 -i $sshKey $username@$ip" Enter
+                    tmux rename-window "${boxName}"
+                    tmux send-keys -t $SESSION_NAME "$sshCommand" Enter
+
                     tmux new-window -t $SESSION_NAME
                     
 
@@ -486,22 +653,48 @@ if [ $ssh_flag = true ] ; then
                         echo
                         return
                     fi 
-                    # echo usename is $username key is $sshKey box is $ip
-                    echo Running: ssh -i "$sshKey" "$username"@"$ip"
+                    sshCommand="$(sshCommandBuilder "$sshKey" "$username" "$ip" )"
+                    echo Running: "$sshCommand"
                     # add code to open in tmux
-                    tmux rename-window "${b:1:-1}"
-                    tmux send-keys -t $SESSION_NAME "ssh -o ConnectTimeout=5 -i $sshKey $username@$ip" Enter
-                    tmux new-window -t $SESSION_NAME
-                    
-                fi 
+                    tmux rename-window "${boxName}"
+                    tmux send-keys -t $SESSION_NAME "$sshCommand" Enter
 
+                    tmux new-window -t $SESSION_NAME
+                elif [[ "$host_flag" != "nil" ]] && [[ "${host_flag,,}" = "${hostName,,}" ]]; then
+                    echo "Opening box via hostname"
+                    echo "Sending to $b"
+
+                    if [ "$specificUsername" != "null" ]; then
+                        echo "$boxName has its own username defined"
+                        echo "Logging into box using username: $specificUsername"
+                        username="$specificUsername"
+                    fi
+
+                    hostIsUp="$(host_check "$ip")"
+                    echo "Ping Host: $ip"
+                    echo "Ping Response: $hostIsUp"
+
+                    if [[ "$hostIsUp" == "fail" ]]; then 
+                        echo
+                        echo "Error this host not reachable via ping."
+                        echo "Testing ssh connection for this host anyway"
+                        echo
+                    fi 
+                    # echo usename is $username key is $sshKey box is $ip
+                    sshCommand="$(sshCommandBuilder "$sshKey" "$username" "$ip" )"
+                    echo Running: "$sshCommand"
+                    # add code to open in tmux
+                    tmux rename-window "${boxName}"
+                    tmux send-keys -t $SESSION_NAME "$sshCommand" Enter
+
+                    tmux new-window -t $SESSION_NAME
+                fi 
             fi
         done
-
+        echo
+        echo
         tmuxHelp
         tmux attach -t $SESSION_NAME
+
     fi
 fi
-
-
-
