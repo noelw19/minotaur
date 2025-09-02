@@ -181,7 +181,18 @@ digHostname() {
 }
 
 host_check() {
-    if nc -zw2 "$1" 22 2>&1
+    local ip="$1"
+    local customPort="$2"
+    if [[ -z $customPort ]]; then
+        customPort="22"
+    else 
+        echo "skipping host check due to custom port"
+        return
+    fi
+
+    # echo nc -zw2 "$ip" "$customPort" 2>&1 
+
+    if nc -zw2 "$ip" 22 2>&1
     then 
         echo "success"
     else 
@@ -215,19 +226,26 @@ scp_Command() {
     local username="$3"
     local ip="$4"
     local isTag=false
+    local disregardKey="$6"
+    local customPort="$7"
 
     if [ ! -z "$5" ]; then
         echo "setting is tag to true"
         local isTag=true
     fi
 
+    if [ -z "$customPort" ]; then
+        customPort="22"
+    fi
+
     if [ "$ip" = "nil" ]; then 
         echo "Couldnt get IP from config file."
     fi
 
-    hostIsUp="$(host_check "$ip")"
-    echo "Ping Host: $ip"
+    hostIsUp="$(host_check "$ip" "$customPort")"
+    echo "Ping Host: $ip "
     echo "Ping Response: $hostIsUp"
+    echo
 
     if [[ "$hostIsUp" == "fail" ]]; then 
         echo
@@ -235,23 +253,24 @@ scp_Command() {
         echo "Testing ssh connection for this host anyway"
         echo
     fi 
+    
+    echo
     echo "Copying to IP: $ip"
-    echo "Ping host up: $hostIsUp"
-    echo Running: scp -o ConnectTimeout=5 -i "$key" -r "$file_to_copy" "$username"@"$ip":~
+    echo Running: scp -o ConnectTimeout=5 -i "$key" -P "$customPort" -r "$file_to_copy" "$username"@"$ip":~
 
-    if [ -z "$key" ]; then
+    if [ -z "$key" ] || [[ "$disregardKey" == "true" ]]; then
         if [ $isTag = true ]; then
-            tmux send-keys -t $SESSION_NAME "scp -o ConnectTimeout=5 -r $file_to_copy $username@$ip:~" Enter
+            tmux send-keys -t $SESSION_NAME "scp -o ConnectTimeout=5 -P $customPort -r $file_to_copy $username@$ip:~" Enter
             tmux new-window -t $SESSION_NAME
         else
-            scp -o ConnectTimeout=5 -r "$file_to_copy" "$username"@"$ip":~
+            scp -o ConnectTimeout=5 -r "$file_to_copy" -P "$customPort" "$username"@"$ip":~ -P "$customPort"
         fi
     else 
         if [ $isTag = true ]; then
-            tmux send-keys -t $SESSION_NAME "scp -o ConnectTimeout=5 -i $key -r $file_to_copy $username@$ip:~" Enter
+            tmux send-keys -t $SESSION_NAME "scp -o ConnectTimeout=5 -i $key -P $customPort -r $file_to_copy $username@$ip:~ -P $customPort" Enter
             tmux new-window -t $SESSION_NAME
         else
-            scp -o ConnectTimeout=5 -i "$key" -r "$file_to_copy" "$username"@"$ip":~
+            scp -o ConnectTimeout=5 -i "$key" -r "$file_to_copy" -P "$customPort" "$username"@"$ip":~ -P "$customPort"
         fi
     fi
 }
@@ -261,11 +280,17 @@ sshCommandBuilder() {
     local sshKey="$1"
     local username="$2"
     local ip="$3"
+    local disregardKey="$4"
+    local customPort="$5"
 
-    if [[ $sshKey = null ]]; then
-        echo "ssh -o ConnectTimeout=5 $username@$ip"
+    if [ -z "$customPort" ]; then
+        customPort="22"
+    fi
+
+    if [[ $sshKey = null ]] || [[ "$disregardKey" == "true" ]]; then
+        echo "ssh -o ConnectTimeout=5 $username@$ip -p $customPort"
     else 
-        echo "ssh -o ConnectTimeout=5 -i $sshKey $username@$ip"
+        echo "ssh -o ConnectTimeout=5 -i $sshKey $username@$ip -p $customPort"
     fi
 }
 
@@ -392,6 +417,10 @@ if [ $copy_flag = true ] ; then
                 boxName=$b
                 serviceTag="$(getConfigProp "boxes.$b.tag")"
                 ip="$(getConfigProp "boxes.$b.ip")"
+
+                customPort="$(getConfigProp "boxes.$b.port")"
+                disregardKey="$(getConfigProp "boxes.$b.noKey")"
+
                 # Check if hostname available (for window name)
                 boxName=$(digHostname "$ip" "$boxName")
                 # remove quotes if any
@@ -402,7 +431,7 @@ if [ $copy_flag = true ] ; then
                     continue
                 fi
 
-                if [ "${tag_flag,,}" = "${serviceTag,,}" ]; then 
+                if [ "${tag_flag:l}" = "${serviceTag:l}" ]; then 
                     
                     if [ "$specificUsername" != "null" ]; then
                         echo "$boxName has its own username defined"
@@ -414,7 +443,7 @@ if [ $copy_flag = true ] ; then
                     echo "Sending to $b"
 
                     tmux rename-window "${boxName}"
-                    scp_Command "$sshKey" "$files" "$username" "$ip" true                    
+                    scp_Command "$sshKey" "$files" "$username" "$ip" true "$disregardKey" "$customPort"                    
                 fi
             fi
         done
@@ -440,6 +469,10 @@ if [ $copy_flag = true ] ; then
                 boxName=$b
                 serviceTag="$(getConfigProp "boxes.$b.tag")"
                 ip="$(getConfigProp "boxes.$b.ip")"
+
+                customPort="$(getConfigProp "boxes.$b.port")"
+                disregardKey="$(getConfigProp "boxes.$b.noKey")"
+
                 # Check if hostname available (for window name)
                 hostName=$(digHostname "$ip" "$boxName")
                 boxName=$hostName
@@ -451,7 +484,7 @@ if [ $copy_flag = true ] ; then
                     continue
                 fi
 
-                if [[ "${singlebox_flag,,}" != "nil" ]] && [ "${singlebox_flag,,}" = "${boxName,,}" ]; then
+                if [[ "${singlebox_flag:l}" != "nil" ]] && [ "${singlebox_flag:l}" = "${boxName:l}" ]; then
                     if [ "$specificUsername" != "null" ]; then
                         echo "$boxName has its own username defined"
                         echo "Logging into box using username: $specificUsername"
@@ -460,7 +493,7 @@ if [ $copy_flag = true ] ; then
 
                     echo "Found single box"
                     echo "Sending to $b"
-                    scp_Command "$sshKey" "$files" "$username" "$ip"
+                    scp_Command "$sshKey" "$files" "$username" "$ip" false "$disregardKey" "$customPort"
 
                 elif [[ "$ip_flag" != "nil" ]] && [[ "$ip_flag" = "$ip" ]]; then
                     if [ "$specificUsername" != "null" ]; then
@@ -471,8 +504,8 @@ if [ $copy_flag = true ] ; then
 
                     echo "Found single box via ip"
                     echo "Sending to $b"
-                    scp_Command "$sshKey" "$files" "$username" "$ip"
-                elif [[ "$host_flag" != "nil" ]] && [[ "${host_flag,,}" = "${hostName,,}" ]]; then
+                    scp_Command "$sshKey" "$files" "$username" "$ip" false
+                elif [[ "$host_flag" != "nil" ]] && [[ "${host_flag:l}" = "${hostName:l}" ]]; then
                     if [ "$specificUsername" != "null" ]; then
                         echo "$boxName has its own username defined"
                         echo "Logging into box using username: $specificUsername"
@@ -481,7 +514,7 @@ if [ $copy_flag = true ] ; then
 
                     echo "Found single box via hostname"
                     echo "Sending to $b"
-                    scp_Command "$sshKey" "$files" "$username" "$ip"
+                    scp_Command "$sshKey" "$files" "$username" "$ip" false "$disregardKey" "$customPort"
 
                 fi 
             fi
@@ -520,6 +553,10 @@ if [ $ssh_flag = true ] ; then
                 boxName=$b
                 serviceTag="$(getConfigProp "boxes.$b.tag")"
                 ip="$(getConfigProp "boxes.$b.ip")"
+
+                customPort="$(getConfigProp "boxes.$b.port")"
+                disregardKey="$(getConfigProp "boxes.$b.noKey")"
+
                 # Check if hostname available (for window name)
                 boxName=$(digHostname "$ip" "$boxName")
                 # remove quotes around any strings
@@ -530,7 +567,7 @@ if [ $ssh_flag = true ] ; then
                     continue
                 fi
 
-                if [ "${tag_flag,,}" = "${serviceTag,,}" ]; then 
+                if [ "${tag_flag:l}" = "${serviceTag:l}" ]; then 
                     echo "Server: $b"
                     echo "IP: $ip"
 
@@ -540,9 +577,10 @@ if [ $ssh_flag = true ] ; then
                         username="$specificUsername"
                     fi
 
-                    hostIsUp="$(host_check "$ip")"
+                    hostIsUp="$(host_check "$ip" "$customPort")"
                     echo "Ping Host: $ip"
                     echo "Ping Response: $hostIsUp"
+                    echo
 
                     if [[ "$hostIsUp" == "fail" ]]; then 
                         echo
@@ -551,7 +589,7 @@ if [ $ssh_flag = true ] ; then
                         echo
                     fi 
 
-                    sshCommand="$(sshCommandBuilder "$sshKey" "$username" "$ip" )"
+                    sshCommand="$(sshCommandBuilder "$sshKey" "$username" "$ip" "$disregardKey" "$customPort" )"
                     echo Running: "$sshCommand"
                     tmux rename-window "${boxName}"
                     # tmux rename-window "${b:1:-1}"
@@ -591,18 +629,26 @@ if [ $ssh_flag = true ] ; then
                 boxName="$b"
                 serviceTag="$(getConfigProp "boxes.$b.tag")"
                 ip="$(getConfigProp "boxes.$b.ip")"
+
+                customPort="$(getConfigProp "boxes.$b.port")"
+                disregardKey="$(getConfigProp "boxes.$b.noKey")"
                 # Check if hostname available (for window name)
                 hostName=$(digHostname "$ip" "$boxName")
                 boxName="$hostName"
                 boxName=$(removeQuotes "$boxName")
                 specificUsername="$(getConfigProp "boxes.$b.username")"
+                singlebox_flag=$(removeQuotes "$singlebox_flag")
+
+                # unset ssh key if the nokey config == true
 
                 if [ -z "$boxName" ]; then 
                 echo "No box name"
                     continue
                 fi
 
-                if [[ "$singlebox_flag" != "nil" ]] && [ "${singlebox_flag,,}" = "${boxName,,}" ]; then
+                echo "${singlebox_flag:l}" "${boxName:l}"
+
+                if [[ "$singlebox_flag" != "nil" ]] && [ "${singlebox_flag:l}" = "${boxName:l}" ]; then
                     echo "Found single box: $b"
 
                     if [ "$specificUsername" != "null" ]; then
@@ -611,9 +657,10 @@ if [ $ssh_flag = true ] ; then
                         username="$specificUsername"
                     fi
 
-                    hostIsUp="$(host_check "$ip")"
+                    hostIsUp="$(host_check "$ip" "$customPort")"
                     echo "Ping Host: $ip"
                     echo "Ping Response: $hostIsUp"
+                    echo
 
                     if [[ "$hostIsUp" == "fail" ]]; then 
                         echo
@@ -623,7 +670,7 @@ if [ $ssh_flag = true ] ; then
                         return
                     fi 
 
-                    sshCommand="$(sshCommandBuilder "$sshKey" "$username" "$ip" )"
+                    sshCommand="$(sshCommandBuilder "$sshKey" "$username" "$ip" "$disregardKey" "$customPort")"
                     echo Running: "$sshCommand"
                     # add code to open in tmux
                     tmux rename-window "${boxName}"
@@ -642,9 +689,10 @@ if [ $ssh_flag = true ] ; then
                         username="$specificUsername"
                     fi
 
-                    hostIsUp="$(host_check "$ip")"
+                    hostIsUp="$(host_check "$ip" "$customPort")"
                     echo "Ping Host: $ip"
                     echo "Ping Response: $hostIsUp"
+                    echo
 
                     if [[ "$hostIsUp" == "fail" ]]; then 
                         echo
@@ -653,14 +701,14 @@ if [ $ssh_flag = true ] ; then
                         echo
                         return
                     fi 
-                    sshCommand="$(sshCommandBuilder "$sshKey" "$username" "$ip" )"
+                    sshCommand="$(sshCommandBuilder "$sshKey" "$username" "$ip" "$disregardKey" "$customPort" )"
                     echo Running: "$sshCommand"
                     # add code to open in tmux
                     tmux rename-window "${boxName}"
                     tmux send-keys -t $SESSION_NAME "$sshCommand" Enter
 
                     tmux new-window -t $SESSION_NAME
-                elif [[ "$host_flag" != "nil" ]] && [[ "${host_flag,,}" = "${hostName,,}" ]]; then
+                elif [[ "$host_flag" != "nil" ]] && [[ "${host_flag:l}" = "${hostName:l}" ]]; then
                     echo "Opening box via hostname"
                     echo "Sending to $b"
 
@@ -670,9 +718,10 @@ if [ $ssh_flag = true ] ; then
                         username="$specificUsername"
                     fi
 
-                    hostIsUp="$(host_check "$ip")"
+                    hostIsUp="$(host_check "$ip" "$customPort")"
                     echo "Ping Host: $ip"
                     echo "Ping Response: $hostIsUp"
+                    echo
 
                     if [[ "$hostIsUp" == "fail" ]]; then 
                         echo
@@ -681,7 +730,7 @@ if [ $ssh_flag = true ] ; then
                         echo
                     fi 
                     # echo usename is $username key is $sshKey box is $ip
-                    sshCommand="$(sshCommandBuilder "$sshKey" "$username" "$ip" )"
+                    sshCommand="$(sshCommandBuilder "$sshKey" "$username" "$ip" "$disregardKey" "$customPort" )"
                     echo Running: "$sshCommand"
                     # add code to open in tmux
                     tmux rename-window "${boxName}"
